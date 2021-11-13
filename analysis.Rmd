@@ -1,0 +1,342 @@
+---
+title: "Analysis"
+author: "Alexander (Sasha) Pastukhov"
+date: "29 4 2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(ggbeeswarm)
+library(tidyverse)
+```
+
+## Import and preprocessing
+
+Import
+
+```{r import}
+data <-
+  read_csv("results.csv", 
+         col_types = cols(vpcode = col_character(),
+                          block = col_integer(),
+                          word = col_character(),
+                          order = col_character(),
+                          response = col_character(),
+                          time = col_character())) %>%
+  rename(Participant = vpcode) %>%
+
+  
+  # extract demographics info
+  mutate(Year = as.numeric(stringr::str_sub(Participant, 4, 7)),
+         Age = 2021 - Year,
+         Sex = stringr::str_sub(Participant, 8, 8),
+         Sex = ifelse(Sex == "F", "W", Sex)) # two ways to enter Frau/Weiblich
+
+words <- read_csv("words.csv", 
+                  col_types = cols(Word = col_character(),
+                                   Condition = col_character(),
+                                   Meaning1 = col_character(),
+                                   Meaning2 = col_character(),
+                                   Meaning2 = col_character()))
+```
+
+Converting JSON strings to sequences of values
+
+```{r convert arrays}
+# convert JSON entries to atomic vectors
+extract_reports <- function(entry){
+  tibble(Percept = unlist(str_split(entry$response, ",")) %>% as.numeric(),
+         Time = unlist(str_split(entry$time, ",")) %>% as.numeric()) %>%
+  mutate(Duration = lead(Time, default=64) - Time)
+}
+
+all_reports <-
+  data %>%
+  group_by(Participant, block, word, Sex, Age) %>%
+  nest() %>%
+  mutate(Percepts = purrr::map(data, ~extract_reports(.))) %>%
+  select(Participant, block, word, Percepts, Sex, Age) %>%
+  unnest(Percepts) %>%
+  ungroup() %>%
+  
+  # add word info
+  left_join(words, by=c("word" = "Word")) 
+```
+
+
+Extracting individual percepts by concatenating same consecutive responses within the time-series
+```{r extract percepts}
+all_percepts <-
+  all_reports  %>%
+  
+  # group together repeated reports 
+  mutate(iPercept = data.table::rleid(Participant, block, word, Percept)) %>%
+  group_by(Participant, block, word, iPercept, Percept, Sex, Age) %>%
+  summarise(Time = Time[1], .groups="drop") %>%
+  
+  # compute duration
+  ungroup() %>%
+  group_by(Participant, block) %>%
+  mutate(Duration = lead(Time) - Time) %>%
+  ungroup() %>%
+
+  # compute exact block duration from "end-of-run" percept 50
+  group_by(Participant, word) %>%
+  mutate(BlockDuration = Time[Percept == 50][1])  %>%
+
+  # add word info
+  left_join(words, by=c("word" = "Word")) 
+```
+
+Excluding participants with too few reports or who reported no meaning for more than 25% of the time.
+
+```{r valid observers}
+participant_summary <-
+  all_percepts %>%
+
+  # compute aggregate block indexes
+  group_by(Participant, word, Sex, Age) %>%
+  summarise(TotalDuration = sum(Duration, na.rm=TRUE),
+            NoMeaningDuration = BlockDuration - TotalDuration,
+            NoMeaningProportion = NoMeaningDuration / TotalDuration,
+            N = n() - 1,
+            .groups="drop") %>%
+  
+  # computing aggregate indexes
+  group_by(Participant, Sex, Age) %>%
+  summarise(MaxNoMeaningProportion = max(NoMeaningProportion),
+            MedianNoMeaningProportion = median(NoMeaningProportion),
+            MedianDuration = median(TotalDuration),
+            MinResponse = min(N),
+            MeanResponses = mean(N),
+            MaxResponses = max(N),
+            WordsN = length(unique(word)),
+            .groups = "drop") %>%
+  mutate(IsValid = (WordsN >= nrow(words)-1) & (MedianNoMeaningProportion <= 0.25))
+
+valid_participants <-
+  participant_summary %>%
+  filter(WordsN == nrow(words),
+         MinResponse > 0,
+         MedianNoMeaningProportion <= 0.25)
+
+reports <- 
+  all_reports %>%
+  filter(Participant %in% valid_participants$Participant) 
+
+percepts <-
+  all_percepts %>%
+  filter(Participant %in% valid_participants$Participant)
+```
+
+## Demographics
+
+```{r}
+participant_summary %>%
+  group_by(Sex) %>%
+  summarise(N = n(),
+            MinAge = min(Age),
+            MaxAge = max(Age),
+            ManAge = mean(Age))
+```
+
+
+## Computing aggregate summary per percept
+
+```{r percept summary}
+percept_summary <-
+  percepts %>%
+  group_by(Condition, Participant, Percept, word) %>%
+  summarize(N= n(),
+            TotalDuration = sum(Duration),
+            MeanDuration = mean(Duration),
+            Proportion = 100 * sum(Duration) / BlockDuration[1], 
+            .groups="drop")
+```
+
+## Words with one meaning.
+```{r}
+unistable <- 
+  percept_summary %>%
+  filter(Condition == "1") %>%
+  
+  # filling in zero for percepts that were never reported
+  ungroup() %>%
+  mutate(PerceptF = factor(Percept, 
+                           levels= c(1, -1,  0),
+                           labels = c("Main", "Other", "None"))) %>%
+  complete(Participant, word, PerceptF, fill=list(Proportion=0, TotalDuration=0, N=0))
+
+unistable_agg <-
+  unistable %>%
+  filter(PerceptF == "Main") %>%
+  group_by(word) %>%
+  summarise(Median = median(Proportion),
+            LowerQ = quantile(Proportion, (1-0.89)/2),
+            UpperQ = quantile(Proportion, 1-(1-0.89)/2),
+            .groups="drop") %>%
+  mutate(Label = glue::glue("{word}: {round(Median, 1)}%"))
+
+unistable_labels <- unistable_agg$Label
+names(unistable_labels) <- unistable_agg$word
+  
+ggplot(unistable, aes(x=PerceptF, y=Proportion)) + 
+  geom_boxplot(outlier.shape = NA) +
+  geom_quasirandom(method="tukeyDense", size=0.7) + 
+  facet_wrap(.~word, labeller = labeller(word = unistable_labels)) + 
+  xlab("Percept") + 
+  ylab("Total dominance time [%]")
+
+# ggsave("unistable.png", units="cm", width=14, height=10)
+```
+
+## Bistable Words.
+```{r}
+bistable <- 
+  percept_summary %>%
+  filter(Condition == "2") %>%
+
+  # filling in zero for percepts that were never reported
+  ungroup() %>%
+  mutate(PerceptF = factor(Percept, 
+                           levels= c("1", "2", "-1",  "0"),
+                           labels = c("1", "2", "Other", "None"))) %>%
+  complete(Participant, word, PerceptF, fill=list(Proportion=0, MeanDuration=0, N=0))
+
+bistable_agg <-
+  bistable %>%
+  filter(PerceptF %in% c("1", "2")) %>%
+  group_by(Participant, word) %>%
+  mutate(Proportion = sum(Proportion)) %>%
+  group_by(word) %>%
+  summarise(Median = median(Proportion),
+            LowerQ = quantile(Proportion, (1-0.89)/2),
+            UpperQ = quantile(Proportion, 1-(1-0.89)/2),
+            .groups="drop") %>%
+  mutate(Label = glue::glue("{word}: {round(Median, 1)}%"))
+
+bistable_labels <- bistable_agg$Label
+names(bistable_labels) <- bistable_agg$word
+
+  
+ggplot(bistable, aes(x=PerceptF, y=Proportion)) + 
+  geom_boxplot(outlier.shape = NA) +
+  geom_quasirandom(method="tukeyDense", size=0.7) + 
+  facet_wrap(.~word, labeller = labeller(word = bistable_labels), ncol = 3) + 
+  xlab("Percept") + 
+  ylab("Total dominance time [%]")
+```
+Computing balance between main meanings
+
+```{r balance}
+meaning_balance <-
+  bistable %>%
+  filter(Percept %in% c(1, 2)) %>%
+  group_by(Participant, word) %>%
+  summarize(JointProportion = sum(Proportion),
+            MeanProportion = median(Proportion),
+            Balance = Proportion[1] / sum(Proportion),
+            dProportion = abs(diff(Proportion)), 
+            .groups="drop") 
+
+meaning_balance_agg <-
+  meaning_balance %>%
+  group_by(word) %>%
+  summarise(MeanProportionSD = round(sd(MeanProportion), 2),
+            MeanProportionLo = quantile(MeanProportion, (1-0.89)/2),
+            MeanProportionHi = quantile(MeanProportion, 1-(1-0.89)/2),
+            MeanProportion = round(mean(MeanProportion), 2),
+            JointProportionSD = round(sd(JointProportion), 2),
+            JointProportion = round(median(JointProportion), 2),
+            
+            MeanBalance = mean(Balance),
+            BalanceSE = sd(Balance) / sqrt(n()-1),
+            BalanceLo = quantile(Balance, (1-0.89)/2),
+            BalanceHi = quantile(Balance, 1-(1-0.89)/2),
+            
+            dProportionSD = round(sd(dProportion), 2),
+            dProportion = round(median(dProportion), 2)) %>%
+  ungroup()  %>%
+  relocate(word, MeanProportion, MeanProportionSD, dProportion, dProportionSD, JointProportion, JointProportionSD) %>%
+  arrange(dProportion, desc(MeanProportion), desc(JointProportion))
+
+best_balance <- meaning_balance_agg$word[1:4]
+
+meaning_balance_agg
+```
+
+```{r}
+ggplot(meaning_balance_agg, aes(x=word, y=MeanBalance, ymin=MeanBalance-BalanceSE, ymax=MeanBalance+BalanceSE)) +  # ymin=BalanceLo, ymax=BalanceHi)) + 
+  geom_errorbar() + 
+  geom_hline(yintercept = 0.5, color="white", size=1) +
+  geom_point() + 
+  xlab(NULL) + 
+  ylab("Balance [mean ± SE]") + 
+  # scale_y_continuous(limits=c(0, 50)) 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+ggsave("bistable-balance.png", units="cm", width=16, height=8)
+
+```
+
+
+Time series for most balanced words
+```{r}
+best_balance <- c("Absatz", "Kiefer", "Schloss", "Gericht")
+
+ggplot(reports %>% 
+         filter(Percept != 50, word %in% best_balance[1], !Participant %in% c("CSO2000W", "GML1998W", "XNB2001W", "GEN1985M", "NBF1996W") ) %>%
+         mutate(Percept = ifelse(Percept == -1, 1.5, Percept)),
+       aes(x=Time, y=Percept)) + 
+  geom_line() + #aes(color=Participant), show.legend = FALSE) +
+  facet_wrap(.~Participant) + 
+  scale_y_continuous(breaks = c(1, 1.5, 2), labels = c("1", "other", "2")) + 
+  scale_x_continuous("Time [s]", limits = c(0, 65))
+
+ggsave("absatz-timeseries.png", units="cm", width=16, height=10)
+```
+
+### Tristable words
+
+```{r}
+tristable <- 
+  percept_summary %>%
+  filter(Condition == "3") %>%
+
+  # filling in zero for percepts that were never reported
+  ungroup() %>%
+  mutate(PerceptF = factor(Percept, 
+                           levels= c(1, 2, 3, -1,  0),
+                           labels = c("1", "2", "3", "Other", "None"))) %>%
+  complete(Participant, word, PerceptF, fill=list(Proportion=0))
+
+tristable_agg <-
+  tristable %>%
+  filter(PerceptF %in% c("1", "2", "3")) %>%
+  group_by(Participant, word) %>%
+  mutate(Proportion = sum(Proportion)) %>%
+  group_by(word) %>%
+  summarise(Median = median(Proportion),
+            LowerQ = quantile(Proportion, (1-0.89)/2),
+            UpperQ = quantile(Proportion, 1-(1-0.89)/2),
+            .groups="drop") %>%
+  mutate(Label = glue::glue("{word}: {round(Median, 1)}%"))
+
+tristable_labels <- tristable_agg$Label
+names(tristable_labels) <- tristable_agg$word
+
+
+ggplot(tristable, aes(x=PerceptF, y=Proportion)) + 
+geom_boxplot(outlier.shape = NA) +
+  geom_quasirandom(method="tukeyDense", size=0.7) + 
+  facet_wrap(.~word, labeller = labeller(word = tristable_labels), ncol = 3) + 
+  xlab("Percept") + 
+  ylab("Total dominance time [%]")
+
+
+ggsave("tristable.png", units="cm", width=14, height=10)
+```
+
+
