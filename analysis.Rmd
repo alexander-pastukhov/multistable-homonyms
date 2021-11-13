@@ -132,14 +132,24 @@ percepts <-
 ```
 
 ## Demographics
-
+All participanbts
 ```{r}
 participant_summary %>%
   group_by(Sex) %>%
   summarise(N = n(),
             MinAge = min(Age),
             MaxAge = max(Age),
-            ManAge = mean(Age))
+            MeanAge = mean(Age))
+```
+
+Valid participants (final sample)
+```{r}
+valid_participants %>%
+  group_by(Sex) %>%
+  summarise(N = n(),
+            MinAge = min(Age),
+            MaxAge = max(Age),
+            MeanAge = mean(Age))
 ```
 
 
