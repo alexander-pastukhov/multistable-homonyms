@@ -6,8 +6,12 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
-
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	warning = FALSE
+)
+library(brms)
 library(ggbeeswarm)
 library(tidyverse)
 ```
@@ -88,6 +92,9 @@ all_percepts <-
 
   # add word info
   left_join(words, by=c("word" = "Word")) 
+  
+  # drop end-of-block Percept == 50
+  filter(Percept != 50)
 ```
 
 Excluding participants with too few reports or who reported no meaning for more than 25% of the time.
@@ -119,7 +126,6 @@ participant_summary <-
 valid_participants <-
   participant_summary %>%
   filter(WordsN == nrow(words),
-         MinResponse > 0,
          MedianNoMeaningProportion <= 0.25)
 
 reports <- 
@@ -132,7 +138,7 @@ percepts <-
 ```
 
 ## Demographics
-All participanbts
+All participants
 ```{r}
 participant_summary %>%
   group_by(Sex) %>%
@@ -160,8 +166,8 @@ percept_summary <-
   percepts %>%
   group_by(Condition, Participant, Percept, word) %>%
   summarize(N= n(),
-            TotalDuration = sum(Duration),
-            MeanDuration = mean(Duration),
+            TotalDuration = sum(Duration, na.rm=TRUE),
+            MeanDuration = mean(Duration, na.rm=TRUE),
             Proportion = 100 * sum(Duration) / BlockDuration[1], 
             .groups="drop")
 ```
@@ -170,7 +176,7 @@ percept_summary <-
 ```{r}
 unistable <- 
   percept_summary %>%
-  filter(Condition == "1") %>%
+  filter(Condition == "1", Percept != 50) %>%
   
   # filling in zero for percepts that were never reported
   ungroup() %>%
@@ -201,6 +207,19 @@ ggplot(unistable, aes(x=PerceptF, y=Proportion)) +
 
 # ggsave("unistable.png", units="cm", width=14, height=10)
 ```
+
+```{r}
+unistable_model <-
+  brms::brm(Proportion ~ PerceptF + (1|Participant) + (1|word),
+            family="beta",
+            data=unistable %>% mutate(Proportion = 0.0025 + (Proportion / 100) * 0.995),
+            cores=future::availableCores())
+
+
+
+
+```
+
 
 ## Bistable Words.
 ```{r}
