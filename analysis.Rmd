@@ -11,9 +11,29 @@ knitr::opts_chunk$set(
 	message = FALSE,
 	warning = FALSE
 )
-library(brms)
+
+library(binom)
 library(ggbeeswarm)
+library(patchwork)
 library(tidyverse)
+```
+
+## Utilities
+
+```{r}
+custom_plot_theme <- function()
+{
+  theme(# text=element_text(family="Arial"),
+        axis.text.x = element_text(size = 8, colour = 'black'), 
+        axis.text.y = element_text(size = 8, colour = 'black'), 
+        axis.title.x = element_text(size = 10), 
+        axis.title.y = element_text(size = 10), 
+        panel.grid.minor.x = element_blank(), 
+        panel.grid.minor.y =  element_line(size = 0.24), 
+        axis.ticks = element_line(size = 0.24),
+        plot.subtitle=element_text(size=8, hjust=0.5),
+        strip.text = element_text(size = 8))
+}
 ```
 
 ## Import and preprocessing
@@ -91,7 +111,7 @@ all_percepts <-
   mutate(BlockDuration = Time[Percept == 50][1])  %>%
 
   # add word info
-  left_join(words, by=c("word" = "Word")) 
+  left_join(words, by=c("word" = "Word")) %>%
   
   # drop end-of-block Percept == 50
   filter(Percept != 50)
@@ -176,7 +196,7 @@ percept_summary <-
 ```{r}
 unistable <- 
   percept_summary %>%
-  filter(Condition == "1", Percept != 50) %>%
+  filter(Condition == "1") %>%
   
   # filling in zero for percepts that were never reported
   ungroup() %>%
@@ -190,34 +210,25 @@ unistable_agg <-
   filter(PerceptF == "Main") %>%
   group_by(word) %>%
   summarise(Median = median(Proportion),
-            LowerQ = quantile(Proportion, (1-0.89)/2),
-            UpperQ = quantile(Proportion, 1-(1-0.89)/2),
+            LowerQ = quantile(Proportion, 0.25),
+            UpperQ = quantile(Proportion, 0.75),
             .groups="drop") %>%
-  mutate(Label = glue::glue("{word}: {round(Median, 1)}%"))
+  mutate(Label = glue::glue("{word}\n{round(Median, 1)}%, [{round(LowerQ, 1)}%..{round(UpperQ, 1)}%]"))
 
 unistable_labels <- unistable_agg$Label
 names(unistable_labels) <- unistable_agg$word
   
 ggplot(unistable, aes(x=PerceptF, y=Proportion)) + 
   geom_boxplot(outlier.shape = NA) +
-  geom_quasirandom(method="tukeyDense", size=0.7) + 
+  geom_quasirandom(method="tukeyDense", size=0.7, width=0.1) + 
   facet_wrap(.~word, labeller = labeller(word = unistable_labels)) + 
   xlab("Percept") + 
-  ylab("Total dominance time [%]")
+  ylab("Total dominance time [%]") + 
+  custom_plot_theme()
+  
 
 # ggsave("unistable.png", units="cm", width=14, height=10)
-```
-
-```{r}
-unistable_model <-
-  brms::brm(Proportion ~ PerceptF + (1|Participant) + (1|word),
-            family="beta",
-            data=unistable %>% mutate(Proportion = 0.0025 + (Proportion / 100) * 0.995),
-            cores=future::availableCores())
-
-
-
-
+# ggsave("unistable.svg", units="cm", width=14, height=10)
 ```
 
 
@@ -241,10 +252,10 @@ bistable_agg <-
   mutate(Proportion = sum(Proportion)) %>%
   group_by(word) %>%
   summarise(Median = median(Proportion),
-            LowerQ = quantile(Proportion, (1-0.89)/2),
-            UpperQ = quantile(Proportion, 1-(1-0.89)/2),
+            LowerQ = quantile(Proportion, 0.25),
+            UpperQ = quantile(Proportion, 0.75),
             .groups="drop") %>%
-  mutate(Label = glue::glue("{word}: {round(Median, 1)}%"))
+  mutate(Label = glue::glue("{word}\n {round(Median, 1)}%, [{round(LowerQ, 1)}%..{round(UpperQ, 1)}%]"))
 
 bistable_labels <- bistable_agg$Label
 names(bistable_labels) <- bistable_agg$word
@@ -252,79 +263,112 @@ names(bistable_labels) <- bistable_agg$word
   
 ggplot(bistable, aes(x=PerceptF, y=Proportion)) + 
   geom_boxplot(outlier.shape = NA) +
-  geom_quasirandom(method="tukeyDense", size=0.7) + 
+  geom_quasirandom(method="tukeyDense", size=0.7, width=0.1) + 
   facet_wrap(.~word, labeller = labeller(word = bistable_labels), ncol = 3) + 
+  custom_plot_theme() +
   xlab("Percept") + 
   ylab("Total dominance time [%]")
-```
-Computing balance between main meanings
 
-```{r balance}
-meaning_balance <-
-  bistable %>%
-  filter(Percept %in% c(1, 2)) %>%
-  group_by(Participant, word) %>%
-  summarize(JointProportion = sum(Proportion),
-            MeanProportion = median(Proportion),
-            Balance = Proportion[1] / sum(Proportion),
-            dProportion = abs(diff(Proportion)), 
-            .groups="drop") 
-
-meaning_balance_agg <-
-  meaning_balance %>%
-  group_by(word) %>%
-  summarise(MeanProportionSD = round(sd(MeanProportion), 2),
-            MeanProportionLo = quantile(MeanProportion, (1-0.89)/2),
-            MeanProportionHi = quantile(MeanProportion, 1-(1-0.89)/2),
-            MeanProportion = round(mean(MeanProportion), 2),
-            JointProportionSD = round(sd(JointProportion), 2),
-            JointProportion = round(median(JointProportion), 2),
-            
-            MeanBalance = mean(Balance),
-            BalanceSE = sd(Balance) / sqrt(n()-1),
-            BalanceLo = quantile(Balance, (1-0.89)/2),
-            BalanceHi = quantile(Balance, 1-(1-0.89)/2),
-            
-            dProportionSD = round(sd(dProportion), 2),
-            dProportion = round(median(dProportion), 2)) %>%
-  ungroup()  %>%
-  relocate(word, MeanProportion, MeanProportionSD, dProportion, dProportionSD, JointProportion, JointProportionSD) %>%
-  arrange(dProportion, desc(MeanProportion), desc(JointProportion))
-
-best_balance <- meaning_balance_agg$word[1:4]
-
-meaning_balance_agg
+# ggsave("bistable.png", units="cm", width=14, height=20)
+# ggsave("bistable.svg", units="cm", width=14, height=20)
 ```
 
+Computing balance between main meanings and  probability that meaning #1 came first
 ```{r}
-ggplot(meaning_balance_agg, aes(x=word, y=MeanBalance, ymin=MeanBalance-BalanceSE, ymax=MeanBalance+BalanceSE)) +  # ymin=BalanceLo, ymax=BalanceHi)) + 
-  geom_errorbar() + 
+bistable_balance_and_order <-
+  percepts %>%
+  
+  # bistable words, primary meanings only
+  filter(Condition == 2, Percept %in% 1:2) %>%
+  
+  group_by(Participant, word) %>%
+  summarise(FirstMeaning = Percept[1], 
+            TotalDuration = sum(Duration),
+            Duration1 = sum(Duration[Percept==1]),
+            Duration2 = sum(Duration[Percept==2]),
+            Balance = Duration1 / TotalDuration,
+            .groups="drop")
+
+balance_plot <-
+  ggplot(bistable_balance_and_order, aes(x=word, y=Balance)) + 
+  geom_boxplot(outlier.shape = NA) + 
   geom_hline(yintercept = 0.5, color="white", size=1) +
-  geom_point() + 
+  geom_quasirandom(method="tukeyDense", width=0.1, size=0.7) + 
   xlab(NULL) + 
-  ylab("Balance [mean ± SE]") + 
-  # scale_y_continuous(limits=c(0, 50)) 
+  ylab("Balance of meanings") + 
+  custom_plot_theme() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
 
-ggsave("bistable-balance.png", units="cm", width=16, height=8)
 
+
+bistable_order <- 
+  bistable_balance_and_order %>%
+  group_by(word) %>%
+  summarise(Bmedian = median(Balance),
+            Blower = quantile(Balance, 0.25),
+            Bupper = quantile(Balance, 0.75),
+            Pfirst = mean(FirstMeaning == 1),
+            Lfirst = binom::binom.exact(sum(FirstMeaning == 1), n())$lower,
+            Ufirst = binom::binom.exact(sum(FirstMeaning == 1), n())$upper,
+            .groups="drop")
+
+order_plot <- 
+  ggplot(bistable_order, aes(x=word, y=Pfirst, ymin=Lfirst, ymax=Ufirst)) + 
+  geom_point() +
+  geom_errorbar() +
+  geom_hline(yintercept = 0.5, color="white", size=1) +
+  xlab(NULL) +
+  ylab("P(Report[1]=meaning #1)") + 
+  custom_plot_theme() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+balance_order_cor <- cor.test(bistable_order$Bmedian, bistable_order$Pfirst)
+balance_order_cor_text <- glue::glue("ρ={round(balance_order_cor$estimate, 2)}, 95% CI = {round(balance_order_cor$conf.int[1], 2)}..{round(balance_order_cor$conf.int[2], 2)}")
+
+corr_plot <- 
+  ggplot(bistable_order, aes(x=Bmedian, y=Pfirst)) + 
+  geom_smooth(method="lm", formula=y~x) +
+  geom_label(aes(label=word)) +
+  xlim(0.25, 1.1) + 
+  ylim(0.25, 1.1) + 
+  xlab("Balance of meanings") + 
+  ylab("P(Report[1]=meaning #1)") +
+  labs(subtitle=balance_order_cor_text) +
+  coord_equal() +
+  custom_plot_theme()
+
+all_plots <- (balance_plot | order_plot) / corr_plot
+all_plots + plot_annotation(tag_levels = 'A') + plot_layout(heights=c(1, 2.5))
+
+# ggsave("bistable-balance-order.png", units="cm", width=14, height=16)
+# ggsave("bistable-balance-order.svg", units="cm", width=14, height=16)
 ```
+
 
 
 Time series for most balanced words
 ```{r}
 best_balance <- c("Absatz", "Kiefer", "Schloss", "Gericht")
 
+
+x <- reports %>% 
+         filter(Percept != 50, word %in% best_balance[1]) %>%
+         mutate(Percept = ifelse(Percept == 2, 3, Percept),
+                Percept = ifelse(Percept == -1, 2, Percept))
+                
 ggplot(reports %>% 
-         filter(Percept != 50, word %in% best_balance[1], !Participant %in% c("CSO2000W", "GML1998W", "XNB2001W", "GEN1985M", "NBF1996W") ) %>%
-         mutate(Percept = ifelse(Percept == -1, 1.5, Percept)),
+         filter(Percept != 50, word %in% best_balance[1]) %>%
+         mutate(Percept = ifelse(Percept == 2, 3, Percept)) %>%
+         mutate(Percept = ifelse(Percept == -1, 2, Percept)),
        aes(x=Time, y=Percept)) + 
   geom_line() + #aes(color=Participant), show.legend = FALSE) +
   facet_wrap(.~Participant) + 
-  scale_y_continuous(breaks = c(1, 1.5, 2), labels = c("1", "other", "2")) + 
-  scale_x_continuous("Time [s]", limits = c(0, 65))
+  scale_y_continuous(NULL, breaks = c(0, 1, 2, 3), labels = c("None", "Stöckel", "Other meaning", "Abschnitt")) + 
+  scale_x_continuous("Time [s]", limits = c(0, 65)) + 
+  custom_plot_theme()
 
-ggsave("absatz-timeseries.png", units="cm", width=16, height=10)
+# ggsave("absatz-timeseries.png", units="cm", width=16, height=14)
+# ggsave("absatz-timeseries.svg", units="cm", width=16, height=14)
 ```
 
 ### Tristable words
@@ -348,10 +392,10 @@ tristable_agg <-
   mutate(Proportion = sum(Proportion)) %>%
   group_by(word) %>%
   summarise(Median = median(Proportion),
-            LowerQ = quantile(Proportion, (1-0.89)/2),
-            UpperQ = quantile(Proportion, 1-(1-0.89)/2),
+            LowerQ = quantile(Proportion, 0.25),
+            UpperQ = quantile(Proportion, 0.75),
             .groups="drop") %>%
-  mutate(Label = glue::glue("{word}: {round(Median, 1)}%"))
+  mutate(Label = glue::glue("{word}\n {round(Median, 1)}%, [{round(LowerQ, 1)}%..{round(UpperQ, 1)}%]"))
 
 tristable_labels <- tristable_agg$Label
 names(tristable_labels) <- tristable_agg$word
@@ -365,7 +409,8 @@ geom_boxplot(outlier.shape = NA) +
   ylab("Total dominance time [%]")
 
 
-ggsave("tristable.png", units="cm", width=14, height=10)
+# ggsave("tristable.png", units="cm", width=14, height=10)
+# ggsave("tristable.png", units="cm", width=14, height=10)
 ```
 
 
