@@ -402,7 +402,7 @@ names(tristable_labels) <- tristable_agg$word
 
 
 ggplot(tristable, aes(x=PerceptF, y=Proportion)) + 
-geom_boxplot(outlier.shape = NA) +
+  geom_boxplot(outlier.shape = NA) +
   geom_quasirandom(method="tukeyDense", size=0.7) + 
   facet_wrap(.~word, labeller = labeller(word = tristable_labels), ncol = 3) + 
   xlab("Percept") + 
@@ -413,4 +413,91 @@ geom_boxplot(outlier.shape = NA) +
 # ggsave("tristable.png", units="cm", width=14, height=10)
 ```
 
+## Combined figure for iPerception paper
 
+
+Unistable
+```{r}
+uniplot <-
+ggplot(filter(unistable, word %in% c("Brief", "Lampe")), aes(x=PerceptF, y=Proportion)) + 
+  geom_boxplot(outlier.shape = NA) +
+  geom_quasirandom(method="tukeyDense", size=0.7, width=0.1) + 
+  facet_wrap(.~word, labeller = labeller(word = unistable_labels)) + 
+  xlab("Percept") + 
+  scale_y_continuous(name = "Total dominance time [%]", limits = c(0, 100)) +
+  custom_plot_theme()
+```
+
+
+Bistable
+```{r}
+biplot <-
+ggplot(filter(bistable, word %in% c("Absatz", "Ball")), aes(x=PerceptF, y=Proportion)) + 
+  geom_boxplot(outlier.shape = NA) +
+  geom_quasirandom(method="tukeyDense", size=0.7, width=0.1) + 
+  facet_wrap(.~word, labeller = labeller(word = bistable_labels), ncol = 3) + 
+  custom_plot_theme() +
+  xlab("Percept") + 
+  scale_y_continuous(name = "Total dominance time [%]", limits = c(0, 100))
+
+```
+
+Tristable
+```{r}
+triplot <-
+ggplot(filter(tristable, word %in% c("Decken", "Mine")), aes(x=PerceptF, y=Proportion)) + 
+  geom_boxplot(outlier.shape = NA) +
+  geom_quasirandom(method="tukeyDense", size=0.7) + 
+  facet_wrap(.~word, labeller = labeller(word = tristable_labels), ncol = 3) + 
+  xlab("Percept") + 
+  scale_y_continuous(name = "Total dominance time [%]", limits = c(0, 100)) +
+  custom_plot_theme()
+```
+
+Bistable words balance
+```{r}
+order_plot <-
+  ggplot(bistable_order, aes(x=word, y=Pfirst, ymin=Lfirst, ymax=Ufirst)) + 
+  geom_point() +
+  geom_errorbar() +
+  geom_hline(yintercept = 0.5, color="white", size=1) +
+  xlab(NULL) +
+  ylab("P(Report[1]=meaning #1)") + 
+  custom_plot_theme() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+
+balance_plot <-
+bistable_balance_and_order |>
+  mutate(word = fct_reorder(word, Balance)) |>
+  ggplot(aes(x=word, y=Balance)) + 
+  geom_boxplot(outlier.shape = NA) + 
+  geom_hline(yintercept = 0.5, color="white", size=1) +
+  geom_quasirandom(method="tukeyDense", width=0.1, size=0.7) + 
+  xlab(NULL) + 
+  ylab("Balance of meanings") + 
+  custom_plot_theme() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+```
+
+
+```{r}
+timeseriesplot <-
+  ggplot(reports %>% 
+         filter(Percept != 50, word %in% best_balance[1]) %>%
+         filter(Participant %in% c("BAW1995M", "BKB2002W", "BTS2001W", "KDD1998W", "CSO2000W", "UDA1993F")) |>
+         mutate(Percept = ifelse(Percept == 2, 3, Percept)) %>%
+         mutate(Percept = ifelse(Percept == -1, 2, Percept)),
+       aes(x=Time, y=Percept)) + 
+  geom_line() + #aes(color=Participant), show.legend = FALSE) +
+  facet_wrap(.~Participant) + 
+  scale_y_continuous(NULL, breaks = c(0, 1, 2, 3), labels = c("None", "Stöckel", "Other", "Abschnitt")) +
+  scale_x_continuous("Time [s]", limits = c(0, 65)) + 
+  custom_plot_theme()
+```
+
+```{r}
+(uniplot / biplot / triplot) | (balance_plot / timeseriesplot) +
+  plot_layout(widths = c(1.5, 1))
+```
