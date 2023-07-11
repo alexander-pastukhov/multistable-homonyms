@@ -413,6 +413,26 @@ ggplot(tristable, aes(x=PerceptF, y=Proportion)) +
 # ggsave("tristable.png", units="cm", width=14, height=10)
 ```
 
+## None responses
+```{r}
+none_reponses <- 
+  percept_summary %>%
+  filter(Percept == 0, Condition != "Test") %>%
+  mutate(PerceptF = factor(Percept, 
+                           levels= c(0),
+                           labels = c("None"))) %>%
+  complete(Participant, word, PerceptF, fill=list(Proportion=0, TotalDuration=0, N=0))
+
+none_responses_plot <- ggplot(none_reponses, aes(x = reorder(word, -Proportion), y = Proportion)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_quasirandom(method="tukeyDense", size=0.7) +
+  xlab("") +
+  scale_y_continuous(name = "Proportion of None responses [%]", limits = c(0, 100)) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+none_responses_plot
+```
+
+
 ## Combined figure for iPerception paper
 
 
@@ -498,6 +518,6 @@ timeseriesplot <-
 ```
 
 ```{r}
-(uniplot / biplot / triplot) | (balance_plot / timeseriesplot) +
-  plot_layout(widths = c(1.5, 1))
+(uniplot / biplot / triplot / none_responses_plot) | (balance_plot / timeseriesplot)  +
+  plot_layout(widths = c(1, 1.5))
 ```
