@@ -414,6 +414,7 @@ ggplot(tristable, aes(x=PerceptF, y=Proportion)) +
 ```
 
 ## None responses
+### Across participants
 ```{r}
 none_reponses <- 
   percept_summary %>%
@@ -431,6 +432,25 @@ none_responses_plot <- ggplot(none_reponses, aes(x = reorder(word, -Proportion),
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
 none_responses_plot
 ```
+
+### Across time
+```{r}
+none_reponses_across_time <- 
+  percepts %>%
+  group_by(Condition, Participant, Percept, word, Time) %>%
+  summarize(Proportion = 100 * sum(Duration) / BlockDuration[1], 
+            .groups="drop") %>%
+  filter(Condition != "Test", Percept == 0) %>%
+  mutate(PerceptF = factor(Percept, 
+                           levels= c(0),
+                           labels = c("None")))
+
+ggplot(none_reponses_across_time, aes(x = Time, y = Proportion)) +
+  geom_line() +
+  scale_x_continuous("Time [s]", limits = c(0, 75)) +
+  scale_y_continuous("Proportion of None responses", limits = c(0, 100))
+```
+
 
 
 ## Combined figure for iPerception paper
