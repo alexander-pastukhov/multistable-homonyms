@@ -500,11 +500,11 @@ none_through_time_df <-
   group_modify(~compute_none_through_time(.))
   
 
-# compute participant average (per time) and then group average (per time)
+# compute participant average per time and then group average per time
 
-# do the same thing for bootstrapped data 1000 times to compute group CIs
+# compute group average per time for bootstrapped data 1000 times
 
-# compute percentile CIs (per time)
+# compute percentile CIs per time
 
 # plot group averages and CIs
 ```
