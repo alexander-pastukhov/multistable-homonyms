@@ -437,7 +437,7 @@ none_responses_plot
 ```{r}
 compute_none_through_time <- function(df){
   none_in_time_df <- tibble(
-    Time = 0:ceiling(df$BlockDuration),
+    Time = 0:df$LongestBlock[1],
     IsNone = FALSE
   )
   for(irow in 1:nrow(df)) {
@@ -453,13 +453,16 @@ compute_none_through_time <- function(df){
 none_through_time_df <-
   percepts |>
   
+  # share common time limit
+  mutate(LongestBlock = max(BlockDuration)) |>
+  
   # compute raw for each participant and word
   group_by(Participant, word) |>
   group_modify(~compute_none_through_time(.))
   
 
 # compute participant average per time and then group average per time
-none_through_time_avg <- 
+none_through_time_avg <-
   none_through_time_df |>
   group_by(Participant, Time) |>
   summarize(avgNoneResponse = mean(IsNone)) |>
@@ -467,7 +470,7 @@ none_through_time_avg <-
   summarize(avgNone = mean(avgNoneResponse))
 
 # compute group average per time for bootstrapped data 1000 times
-bootstrapped_data <- function(df, replace=TRUE) {
+sample_group_average <- function(df, replace=TRUE) {
   df |>
     group_by(Participant, Time) |>
     slice_sample(prop = 1, replace = replace) |>
@@ -477,11 +480,11 @@ bootstrapped_data <- function(df, replace=TRUE) {
     summarise(avgNone = mean(avgNoneResponse))
 }
 
-bootstrapped_avgs <- purrr::map_dfr(1:1000, ~bootstrapped_data(none_through_time_df))
+sampled_avgs <- purrr::map_dfr(1:1000, ~sample_group_average(none_through_time_df), .progress = TRUE)
 
 # compute percentile CIs per time
-bootstrapped_CIs <- 
-  bootstrapped_avgs %>%
+bootstrapped_CIs <-
+  sampled_avgs %>%
   group_by(Time) %>%
   summarise(LowerCI = quantile(avgNone, (1 - 0.97) / 2),
             UpperCI = quantile(avgNone, 1 - (1 - 0.97) / 2),
@@ -492,12 +495,12 @@ group_avgs <- left_join(none_through_time_avg, bootstrapped_CIs, by = "Time")
 
 
 ggplot(group_avgs, aes(x = Time, y = avgNone)) + 
-  geom_point() +
-  geom_errorbar(aes(ymin = LowerCI, ymax = UpperCI)) +
+  geom_ribbon(aes(ymin = LowerCI, ymax = UpperCI), alpha = 0.5) +
   geom_line() +
-  scale_y_continuous(name = "Average proportion of None responses") +
+  scale_y_continuous(name = "Average proportion of None responses", limits = c(0, 1)) +
   scale_x_continuous(name = "Time [s]")
 ```
+
 
 ## Combined figure for iPerception paper
 
