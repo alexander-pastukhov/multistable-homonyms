@@ -474,7 +474,40 @@ time_series_data_complete <-
   group_map(~time_series_function(.x))
 ```
 
+### Sasha's version
 
+```{r}
+compute_none_through_time <- function(df){
+  none_in_time_df <- tibble(
+    Time = 0:ceiling(df$BlockDuration),
+    IsNone = FALSE
+  )
+  for(irow in 1:nrow(df)) {
+    # we find ALL time points AFTER the onset of the word and mark ALL of them based on the current percept
+    # if there is a percept after that, it will overwrite relevant portion of the time series later on
+    iafter <- none_in_time_df$Time >= df$Time[irow]
+    none_in_time_df$IsNone[iafter] <- df$Percept[irow] == -1
+  }
+  
+  none_in_time_df
+}
+
+none_through_time_df <-
+  percepts |>
+  
+  # compute raw for each participant and word
+  group_by(Participant, word) |>
+  group_modify(~compute_none_through_time(.))
+  
+
+# compute participant average (per time) and then group average (per time)
+
+# do the same thing for bootstrapped data 1000 times to compute group CIs
+
+# compute percentile CIs (per time)
+
+# plot group averages and CIs
+```
 
 ## Combined figure for iPerception paper
 
