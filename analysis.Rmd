@@ -435,48 +435,6 @@ none_responses_plot
 
 ### Across time
 ```{r}
-none_responses_across_time <- 
-  percepts %>%
-  filter(Participant == "UDA1993F", word == "Bar")
-
-time_series_data <- 
-  tibble(
-    Participant = none_responses_across_time$Participant[1],
-    Word = none_responses_across_time$word[1],
-    Seconds = 1:ceiling(none_responses_across_time$BlockDuration),
-    Percept = NA)
-
-for (t in 1:length(none_responses_across_time$Time)) {
-  time_series_data$Percept = ifelse(time_series_data$Seconds >= none_responses_across_time$Time[t], none_responses_across_time$Percept[t], time_series_data$Percept)
-}
-```
-
-```{r}
-time_series_function <- function(df){
-  data <- tibble(
-    Participant = df$Participant[1],
-    Word = df$word[1],
-    Seconds = 1:ceiling(df$BlockDuration),
-    Percept = NA)
-  
- for (t in 1:length(df$Time)) {
-  data$Percept = ifelse(data$Seconds >= df$Time[t], df$Percept[t], data$Percept)
- }
-  
-  return(data)
-}
-
-single_participant <- time_series_function(none_responses_across_time)
-
-time_series_data_complete <- 
-  percepts %>%
-  group_by(Participant, word) %>%
-  group_map(~time_series_function(.x))
-```
-
-### Sasha's version
-
-```{r}
 compute_none_through_time <- function(df){
   none_in_time_df <- tibble(
     Time = 0:ceiling(df$BlockDuration),
@@ -501,12 +459,44 @@ none_through_time_df <-
   
 
 # compute participant average per time and then group average per time
+none_through_time_avg <- 
+  none_through_time_df |>
+  group_by(Participant, Time) |>
+  summarize(avgNoneResponse = mean(IsNone)) |>
+  group_by(Time) |>
+  summarize(avgNone = mean(avgNoneResponse))
 
 # compute group average per time for bootstrapped data 1000 times
+bootstrapped_data <- function(df, replace=TRUE) {
+  df |>
+    group_by(Participant, Time) |>
+    slice_sample(prop = 1, replace = replace) |>
+    summarise(avgNoneResponse = sum(IsNone)  / n(), 
+              .groups = "drop") |>
+    group_by(Time) |>
+    summarise(avgNone = mean(avgNoneResponse))
+}
+
+bootstrapped_avgs <- purrr::map_dfr(1:1000, ~bootstrapped_data(none_through_time_df))
 
 # compute percentile CIs per time
+bootstrapped_CIs <- 
+  bootstrapped_avgs %>%
+  group_by(Time) %>%
+  summarise(LowerCI = quantile(avgNone, (1 - 0.97) / 2),
+            UpperCI = quantile(avgNone, 1 - (1 - 0.97) / 2),
+            .groups = "drop")
 
 # plot group averages and CIs
+group_avgs <- left_join(none_through_time_avg, bootstrapped_CIs, by = "Time")
+
+
+ggplot(group_avgs, aes(x = Time, y = avgNone)) + 
+  geom_point() +
+  geom_errorbar(aes(ymin = LowerCI, ymax = UpperCI)) +
+  geom_line() +
+  scale_y_continuous(name = "Average proportion of None responses") +
+  scale_x_continuous(name = "Time [s]")
 ```
 
 ## Combined figure for iPerception paper
