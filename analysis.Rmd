@@ -435,19 +435,19 @@ none_responses_plot
 
 ### Across time
 ```{r}
-none_reponses_across_time <- 
+none_responses_across_time <- 
   percepts %>%
   filter(Participant == "UDA1993F", word == "Bar")
 
 time_series_data <- 
   tibble(
-    Participant = none_reponses_across_time$Participant[1],
-    Word = none_reponses_across_time$word[1],
-    Seconds = 1:ceiling(none_reponses_across_time$BlockDuration),
+    Participant = none_responses_across_time$Participant[1],
+    Word = none_responses_across_time$word[1],
+    Seconds = 1:ceiling(none_responses_across_time$BlockDuration),
     Percept = NA)
 
-for (t in 1:length(none_reponses_across_time$Time)) {
-  time_series_data$Percept = ifelse(time_series_data$Seconds >= none_reponses_across_time$Time[t], none_reponses_across_time$Percept[t], time_series_data$Percept)
+for (t in 1:length(none_responses_across_time$Time)) {
+  time_series_data$Percept = ifelse(time_series_data$Seconds >= none_responses_across_time$Time[t], none_responses_across_time$Percept[t], time_series_data$Percept)
 }
 ```
 
@@ -457,15 +457,18 @@ time_series_function <- function(df){
     Participant = df$Participant[1],
     Word = df$word[1],
     Seconds = 1:ceiling(df$BlockDuration),
-    Percept = NA
-  )
+    Percept = NA)
   
  for (t in 1:length(df$Time)) {
   data$Percept = ifelse(data$Seconds >= df$Time[t], df$Percept[t], data$Percept)
-  } 
+ }
+  
+  return(data)
 }
 
-time_series_data <- 
+single_participant <- time_series_function(none_responses_across_time)
+
+time_series_data_complete <- 
   percepts %>%
   group_by(Participant, word) %>%
   group_map(~time_series_function(.x))
