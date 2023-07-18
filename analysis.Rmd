@@ -437,18 +437,38 @@ none_responses_plot
 ```{r}
 none_reponses_across_time <- 
   percepts %>%
-  group_by(Condition, Participant, Percept, word, Time) %>%
-  summarize(Proportion = 100 * sum(Duration) / BlockDuration[1], 
-            .groups="drop") %>%
-  filter(Condition != "Test", Percept == 0) %>%
-  mutate(PerceptF = factor(Percept, 
-                           levels= c(0),
-                           labels = c("None")))
+  filter(Participant == "UDA1993F", word == "Bar")
 
-ggplot(none_reponses_across_time, aes(x = Time, y = Proportion)) +
-  geom_line() +
-  scale_x_continuous("Time [s]", limits = c(0, 75)) +
-  scale_y_continuous("Proportion of None responses", limits = c(0, 100))
+time_series_data <- 
+  tibble(
+    Participant = none_reponses_across_time$Participant[1],
+    Word = none_reponses_across_time$word[1],
+    Seconds = 1:ceiling(none_reponses_across_time$BlockDuration),
+    Percept = NA)
+
+for (t in 1:length(none_reponses_across_time$Time)) {
+  time_series_data$Percept = ifelse(time_series_data$Seconds >= none_reponses_across_time$Time[t], none_reponses_across_time$Percept[t], time_series_data$Percept)
+}
+```
+
+```{r}
+time_series_function <- function(df){
+  data <- tibble(
+    Participant = df$Participant[1],
+    Word = df$word[1],
+    Seconds = 1:ceiling(df$BlockDuration),
+    Percept = NA
+  )
+  
+ for (t in 1:length(df$Time)) {
+  data$Percept = ifelse(data$Seconds >= df$Time[t], df$Percept[t], data$Percept)
+  } 
+}
+
+time_series_data <- 
+  percepts %>%
+  group_by(Participant, word) %>%
+  group_map(~time_series_function(.x))
 ```
 
 
